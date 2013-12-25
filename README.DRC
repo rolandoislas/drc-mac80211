@@ -1,0 +1,8 @@
+mac80211 DRC patches
+====================
+
+**NOTE** Like all our patches to standard software, this code is fragile and
+not ready for production use. Use at your own risk.
+
+* Added a new /sys node for mac80211 devices: "tsf".
+  * Exports the Wi-Fi Time Synchronization Function to userland.
