@@ -1733,6 +1733,44 @@ static void ieee80211_assign_perm_addr(struct ieee80211_local *local,
 	mutex_unlock(&local->iflist_mtx);
 }
 
+static ssize_t ieee80211_tsf_show(struct device *dev, struct device_attribute *attr, char *buf) 
+{ 
+  struct net_device *ndev; 
+  struct ieee80211_sub_if_data *sdata; 
+  int need_remove = -1; 
+  u64 output = 0ULL; 
+ 
+  ndev = container_of(dev, struct net_device, dev); 
+ 
+  if(ndev == NULL) return -EIO; 
+ 
+  sdata = IEEE80211_DEV_TO_SUB_IF(ndev); 
+ 
+  if(sdata == NULL) return -EIO; 
+ 
+  if((sdata->flags & IEEE80211_SDATA_IN_DRIVER) == 0) 
+  { 
+    need_remove = drv_add_interface(sdata->local, sdata); 
+    if(need_remove != 0) 
+    { 
+      return -EIO; 
+    } 
+  } 
+ 
+  output = drv_get_tsf(sdata->local, sdata); 
+ 
+  if(need_remove == 0) // add earlier was needed and successful, so undo 
+  { 
+    drv_remove_interface(sdata->local, sdata); 
+  } 
+ 
+  memcpy(buf, &output, sizeof(u64)); 
+ 
+  return sizeof(u64); 
+} 
+ 
+DEVICE_ATTR(tsf, S_IRUGO, ieee80211_tsf_show, NULL );
+
 int ieee80211_if_add(struct ieee80211_local *local, const char *name,
 		     unsigned char name_assign_type,
 		     struct wireless_dev **new_wdev, enum nl80211_iftype type,
@@ -1890,6 +1928,12 @@ int ieee80211_if_add(struct ieee80211_local *local, const char *name,
 			ieee80211_if_free(ndev);
 			return ret;
 		}
+		
+		ret = device_create_file(&ndev->dev, &dev_attr_tsf);
+		if(ret) {
+		  unregister_netdevice(ndev); // gets freed by destructor
+		  return ret;
+		}
 	}
 
 	mutex_lock(&local->iflist_mtx);
@@ -1913,6 +1957,7 @@ void ieee80211_if_remove(struct ieee80211_sub_if_data *sdata)
 	synchronize_rcu();
 
 	if (sdata->dev) {
+		device_remove_file(&sdata->dev->dev, &dev_attr_tsf);
 		unregister_netdevice(sdata->dev);
 	} else {
 		cfg80211_unregister_wdev(&sdata->wdev);
@@ -1956,8 +2001,10 @@ void ieee80211_remove_interfaces(struct ieee80211_local *local)
 	list_for_each_entry_safe(sdata, tmp, &local->interfaces, list) {
 		list_del(&sdata->list);
 
-		if (sdata->dev)
+		if (sdata->dev) {
+			device_remove_file(&sdata->dev->dev, &dev_attr_tsf);
 			unregister_netdevice_queue(sdata->dev, &unreg_list);
+		}
 		else
 			list_add(&sdata->list, &wdev_list);
 	}
